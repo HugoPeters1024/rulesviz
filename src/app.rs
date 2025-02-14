@@ -24,6 +24,7 @@ pub enum NodeKind {
     Concatenate,
     SetToValue,
     CalculateSum,
+    SearchAndReplace,
     IfEqual,
     IfContains,
 }
@@ -37,6 +38,7 @@ impl NodeKind {
             NodeKind::Concatenate => "concatenate",
             NodeKind::SetToValue => "set to value",
             NodeKind::CalculateSum => "calculate sum",
+            NodeKind::SearchAndReplace => "search and replace",
             NodeKind::IfEqual => "if equal",
             NodeKind::IfContains => "if contains",
         }
@@ -129,11 +131,24 @@ impl Node {
             NodeKind::IfContains => {
                 let discr = &inputs[0];
                 let test = &inputs[1];
-                self.outputs[0].output_preview.push(if discr.contains(test) {
-                    inputs[2].clone()
-                } else {
-                    inputs[3].clone()
-                });
+                self.outputs[0]
+                    .output_preview
+                    .push(if discr.contains(test) {
+                        inputs[2].clone()
+                    } else {
+                        inputs[3].clone()
+                    });
+            }
+            NodeKind::SearchAndReplace => {
+                let discr = &inputs[0];
+                let mut output = discr.clone();
+                for (lhs, rhs) in inputs[1].lines().filter_map(|x| x.split_once("->")) {
+                    if discr.contains(lhs) {
+                        output = discr.replace(lhs, rhs);
+                        break;
+                    }
+                }
+                self.outputs[0].output_preview.push(output);
             }
         }
     }
@@ -152,7 +167,12 @@ impl Node {
                     .column(Column::remainder().resizable(false))
                     .body(|mut body| {
                         for i in 0..field_row_count {
-                            body.row(20.0, |mut row| {
+                            let height = if i < self.inputs.len() && self.inputs[i].multiline {
+                                80.0
+                            } else {
+                                20.0
+                            };
+                            body.row(height, |mut row| {
                                 row.col(|ui| {
                                     if i < self.inputs.len() {
                                         match self.inputs[i].show(ui) {
@@ -271,7 +291,15 @@ impl Node {
                     InputField::field_or_value("when false"),
                 ],
                 outputs: vec![OutputField::new("output")],
-            }
+            },
+            NodeKind::SearchAndReplace => Node {
+                kind,
+                inputs: vec![
+                    InputField::field_only("input"),
+                    InputField::value_only_multiline("mapping"),
+                ],
+                outputs: vec![OutputField::new("output")],
+            },
         }
     }
 
@@ -309,6 +337,7 @@ pub struct InputField {
     kind: InputKind,
     name: String,
     position: egui::Pos2,
+    multiline: bool,
 }
 
 impl InputField {
@@ -317,6 +346,7 @@ impl InputField {
             kind: InputKind::FieldOnly,
             name: name.to_string(),
             position: egui::Pos2::default(),
+            multiline: false,
         }
     }
 
@@ -325,6 +355,7 @@ impl InputField {
             kind: InputKind::FieldOrValue(FieldOrValue::default()),
             name: name.to_string(),
             position: egui::Pos2::default(),
+            multiline: false,
         }
     }
 
@@ -335,6 +366,18 @@ impl InputField {
             },
             name: name.to_string(),
             position: egui::Pos2::default(),
+            multiline: false,
+        }
+    }
+
+    fn value_only_multiline(name: &str) -> Self {
+        InputField {
+            kind: InputKind::ValueOnly {
+                value: String::new(),
+            },
+            name: name.to_string(),
+            position: egui::Pos2::default(),
+            multiline: true,
         }
     }
 
@@ -375,11 +418,12 @@ impl InputField {
                     toggle: true,
                     value,
                 }) => {
-                    ui.add(
+                    let text_edit = if self.multiline {
+                        egui::TextEdit::multiline(value)
+                    } else {
                         egui::TextEdit::singleline(value)
-                            .clip_text(true)
-                            .desired_width(128.0),
-                    );
+                    };
+                    ui.add(text_edit.clip_text(true).desired_width(128.0));
 
                     match &mut self.kind {
                         InputKind::FieldOrValue(field_or_value) => {
@@ -448,6 +492,7 @@ impl RulesApp {
             "description",
             "price",
             "stock",
+            "color",
         ]));
         ret.initial_node = ret.nodes.keys().next().cloned();
 
@@ -456,6 +501,7 @@ impl RulesApp {
             "description",
             "price",
             "stock",
+            "colour",
         ]));
 
         ret.preview_items.push(Item(HashMap::from_iter([
@@ -466,6 +512,7 @@ impl RulesApp {
             ),
             ("price".to_string(), "$50.0".to_string()),
             ("stock".to_string(), "-1".to_string()),
+            ("color".to_string(), "blue".to_string()),
         ])));
 
         ret.preview_items.push(Item(HashMap::from_iter([
@@ -473,6 +520,7 @@ impl RulesApp {
             ("description".to_string(), "a very comfy stool".to_string()),
             ("price".to_string(), "$30.0".to_string()),
             ("stock".to_string(), "9".to_string()),
+            ("color".to_string(), "grey".to_string()),
         ])));
 
         ret.preview_items.push(Item(HashMap::from_iter([
@@ -483,6 +531,7 @@ impl RulesApp {
             ),
             ("price".to_string(), "$999.0".to_string()),
             ("stock".to_string(), "42".to_string()),
+            ("color".to_string(), "porple".to_string()),
         ])));
 
         ret.preview_items.push(Item(HashMap::from_iter([
@@ -493,6 +542,7 @@ impl RulesApp {
             ),
             ("price".to_string(), "$1.0".to_string()),
             ("stock".to_string(), "1".to_string()),
+            ("color".to_string(), "black".to_string()),
         ])));
 
         ret.preview_items.push(Item(HashMap::from_iter([
@@ -500,6 +550,7 @@ impl RulesApp {
             ("description".to_string(), "A stick diss track".to_string()),
             ("price".to_string(), "$69.0".to_string()),
             ("stock".to_string(), "100".to_string()),
+            ("color".to_string(), "unknown".to_string()),
         ])));
 
         ret
@@ -531,6 +582,7 @@ impl RulesApp {
             .collect::<HashMap<_, _>>();
         self.edges.retain(|lhs, _| retain_edges[lhs]);
 
+        // more stupid hacks
         self.inverse_edges.clear();
         for (input, output) in &self.edges {
             self.inverse_edges
@@ -553,6 +605,7 @@ impl RulesApp {
     }
 
     pub fn update_node_previews(&mut self) {
+        // seed the project field outputs with the items
         for project_field in self
             .nodes
             .get_mut(&self.initial_node.unwrap())
@@ -595,6 +648,7 @@ impl RulesApp {
                 }
             }
 
+            // ugly hack
             if node.kind != NodeKind::ProjectFields {
                 node.clear_output_previews();
             }
