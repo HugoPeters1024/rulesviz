@@ -27,6 +27,7 @@ pub enum NodeKind {
     SearchAndReplace,
     IfEqual,
     IfContains,
+    Filter,
     Supervisor,
 }
 
@@ -43,6 +44,7 @@ impl NodeKind {
             NodeKind::IfEqual => "if equal",
             NodeKind::IfContains => "if contains",
             NodeKind::Supervisor => "supervisor",
+            NodeKind::Filter => "filter",
         }
     }
 
@@ -162,6 +164,11 @@ impl Node {
                 self.outputs[0].output_preview.push(output);
             }
             NodeKind::Supervisor => {}
+            NodeKind::Filter => {
+                if inputs[1] == "keep" {
+                    self.outputs[0].output_preview.push(inputs[0].clone());
+                }
+            }
         }
     }
 
@@ -185,7 +192,9 @@ impl Node {
                 }
 
                 if self.kind == NodeKind::Supervisor {
-                    ui.add(egui::Image::new(egui::include_image!("../assets/maarten_normal_eyes.png")));
+                    ui.add(egui::Image::new(egui::include_image!(
+                        "../assets/maarten_normal_eyes.png"
+                    )));
                 }
 
                 let field_row_count = self.inputs.len().max(self.outputs.len());
@@ -340,7 +349,16 @@ impl Node {
                 inputs: Vec::new(),
                 outputs: Vec::new(),
                 is_closed: false,
-            }
+            },
+            NodeKind::Filter => Node {
+                kind,
+                inputs: vec![
+                    InputField::field_only("input"),
+                    InputField::field_only("discrimator"),
+                ],
+                outputs: vec![OutputField::new("output")],
+                is_closed: false,
+            },
         }
     }
 
