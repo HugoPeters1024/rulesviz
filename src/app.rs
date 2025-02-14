@@ -27,6 +27,7 @@ pub enum NodeKind {
     SearchAndReplace,
     IfEqual,
     IfContains,
+    Supervisor,
 }
 
 impl NodeKind {
@@ -41,6 +42,15 @@ impl NodeKind {
             NodeKind::SearchAndReplace => "search and replace",
             NodeKind::IfEqual => "if equal",
             NodeKind::IfContains => "if contains",
+            NodeKind::Supervisor => "supervisor",
+        }
+    }
+
+    fn is_action(&self) -> bool {
+        match self {
+            NodeKind::ProjectFields => false,
+            NodeKind::OutputFields => false,
+            _ => true,
         }
     }
 }
@@ -49,6 +59,7 @@ pub struct Node {
     kind: NodeKind,
     inputs: Vec<InputField>,
     outputs: Vec<OutputField>,
+    is_closed: bool,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
@@ -150,6 +161,7 @@ impl Node {
                 }
                 self.outputs[0].output_preview.push(output);
             }
+            NodeKind::Supervisor => {}
         }
     }
 
@@ -160,6 +172,22 @@ impl Node {
             .resizable(false)
             .collapsible(false)
             .show(ctx, |ui| {
+                if self.kind.is_action() {
+                    ui.scope(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::LEFT), |ui| {
+                            ui.style_mut().visuals.widgets.inactive.weak_bg_fill =
+                                Color32::DARK_RED;
+                            if ui.button("remove").clicked() {
+                                self.is_closed = true;
+                            }
+                        });
+                    });
+                }
+
+                if self.kind == NodeKind::Supervisor {
+                    ui.add(egui::Image::new(egui::include_image!("../assets/maarten_normal_eyes.png")));
+                }
+
                 let field_row_count = self.inputs.len().max(self.outputs.len());
                 TableBuilder::new(ui)
                     .id_salt("first table")
@@ -250,6 +278,7 @@ impl Node {
                 kind,
                 inputs: vec![InputField::field_only("input")],
                 outputs: vec![OutputField::new("output")],
+                is_closed: false,
             },
             NodeKind::Concatenate => Node {
                 kind,
@@ -258,11 +287,13 @@ impl Node {
                     InputField::field_or_value("right"),
                 ],
                 outputs: vec![OutputField::new("output")],
+                is_closed: false,
             },
             NodeKind::SetToValue => Node {
                 kind,
                 inputs: vec![InputField::value_only("value")],
                 outputs: vec![OutputField::new("output")],
+                is_closed: false,
             },
             NodeKind::CalculateSum => Node {
                 kind,
@@ -271,6 +302,7 @@ impl Node {
                     InputField::field_or_value("rhs"),
                 ],
                 outputs: vec![OutputField::new("output")],
+                is_closed: false,
             },
             NodeKind::IfEqual => Node {
                 kind,
@@ -281,6 +313,7 @@ impl Node {
                     InputField::field_or_value("when false"),
                 ],
                 outputs: vec![OutputField::new("output")],
+                is_closed: false,
             },
             NodeKind::IfContains => Node {
                 kind,
@@ -291,6 +324,7 @@ impl Node {
                     InputField::field_or_value("when false"),
                 ],
                 outputs: vec![OutputField::new("output")],
+                is_closed: false,
             },
             NodeKind::SearchAndReplace => Node {
                 kind,
@@ -299,7 +333,14 @@ impl Node {
                     InputField::value_only_multiline("mapping"),
                 ],
                 outputs: vec![OutputField::new("output")],
+                is_closed: false,
             },
+            NodeKind::Supervisor => Node {
+                kind,
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                is_closed: false,
+            }
         }
     }
 
@@ -308,6 +349,7 @@ impl Node {
             kind: NodeKind::ProjectFields,
             inputs: vec![],
             outputs: fields.iter().map(|x| OutputField::new(x)).collect(),
+            is_closed: false,
         }
     }
 
@@ -316,6 +358,7 @@ impl Node {
             kind: NodeKind::OutputFields,
             inputs: fields.iter().map(|x| InputField::field_only(x)).collect(),
             outputs: vec![],
+            is_closed: false,
         }
     }
 }
@@ -566,13 +609,22 @@ impl RulesApp {
         self.nodes.insert(next_id, node);
     }
 
+    pub fn remove_closed_nodes(&mut self) {
+        self.nodes.retain(|_, n| !n.is_closed);
+    }
+
     pub fn update_edge_state(&mut self) {
         let retain_edges = self
             .edges
             .iter()
             .map(|(lhs, _)| {
                 (lhs.clone(), {
-                    if let Some(input) = self.resolve_input(lhs) {
+                    if let Some(Node {
+                        is_closed: true, ..
+                    }) = self.nodes.get(&lhs.window_id)
+                    {
+                        false
+                    } else if let Some(input) = self.resolve_input(lhs) {
                         input.is_currently_for_field()
                     } else {
                         false
@@ -718,6 +770,7 @@ impl Default for RulesApp {
 
 impl eframe::App for RulesApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui_extras::install_image_loaders(ctx);
         ctx.set_pixels_per_point(1.2);
         let mut was_interaction = false;
         for (id, action_node) in self.nodes.iter_mut() {
@@ -799,6 +852,8 @@ impl eframe::App for RulesApp {
             {
                 self.show_dropdown = true;
                 set_dropdown_location = true;
+                self.input_slot = None;
+                self.output_slot = None;
             }
 
             // Show dropdown if right-clicked
@@ -814,9 +869,7 @@ impl eframe::App for RulesApp {
                 }
                 let response = window.show(ctx, |ui| {
                     for node_kind in NodeKind::iter() {
-                        if node_kind == NodeKind::ProjectFields
-                            || node_kind == NodeKind::OutputFields
-                        {
+                        if !node_kind.is_action() {
                             continue;
                         }
 
@@ -835,6 +888,7 @@ impl eframe::App for RulesApp {
             }
         });
 
+        self.remove_closed_nodes();
         self.update_edge_state();
         self.update_node_previews();
     }
