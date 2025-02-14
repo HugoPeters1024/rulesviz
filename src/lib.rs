@@ -2,4 +2,4 @@
 
 mod app;
 mod toggle;
-pub use app::MyApp;
+pub use app::RulesApp;

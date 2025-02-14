@@ -20,7 +20,7 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "ruleviz",
         native_options,
-        Box::new(|_cc| Ok(Box::new(ruleviz::MyApp::new()))),
+        Box::new(|_cc| Ok(Box::new(ruleviz::RulesApp::new()))),
     )
 }
 
@@ -50,7 +50,7 @@ fn main() {
             .start(
                 canvas,
                 web_options,
-                Box::new(|_cc| Ok(Box::new(ruleviz::MyApp::new()))),
+                Box::new(|_cc| Ok(Box::new(ruleviz::RulesApp::new()))),
             )
             .await;
 
