@@ -108,7 +108,11 @@ impl Node {
                     rhs.output_preview.push(lhs.clone());
                 }
             }
-            NodeKind::OutputFields => {}
+            NodeKind::OutputFields => {
+                for (lhs, rhs) in inputs.iter().zip(self.outputs.iter_mut()) {
+                    rhs.output_preview.push(lhs.clone());
+                }
+            }
             NodeKind::StripHtml => {
                 assert!(self.outputs.len() == 1);
                 self.outputs[0]
@@ -228,17 +232,21 @@ impl Node {
                                 });
                                 row.col(|ui| {
                                     if i < self.outputs.len() {
-                                        match self.outputs[i].show(ui) {
-                                            Some(field_event) => {
-                                                event = Some(NodeEvent::FieldEvent {
-                                                    inner: field_event,
-                                                    node_ref: NodeRef::Output(OutputRef {
-                                                        window_id: *id,
-                                                        field_idx: i,
-                                                    }),
-                                                })
+                                        if self.outputs[i].non_clickable {
+                                            ui.label(&self.outputs[i].name);
+                                        } else {
+                                            match self.outputs[i].show(ui) {
+                                                Some(field_event) => {
+                                                    event = Some(NodeEvent::FieldEvent {
+                                                        inner: field_event,
+                                                        node_ref: NodeRef::Output(OutputRef {
+                                                            window_id: *id,
+                                                            field_idx: i,
+                                                        }),
+                                                    })
+                                                }
+                                                None => {}
                                             }
-                                            None => {}
                                         }
                                     }
                                 });
@@ -375,7 +383,10 @@ impl Node {
         Node {
             kind: NodeKind::OutputFields,
             inputs: fields.iter().map(|x| InputField::field_only(x)).collect(),
-            outputs: vec![],
+            outputs: fields
+                .iter()
+                .map(|x| OutputField::new_non_clickable(x))
+                .collect(),
             is_closed: false,
         }
     }
@@ -505,6 +516,7 @@ pub struct OutputField {
     name: String,
     position: egui::Pos2,
     output_preview: Vec<String>,
+    non_clickable: bool,
 }
 
 impl OutputField {
@@ -513,6 +525,17 @@ impl OutputField {
             name: name.to_string(),
             position: egui::Pos2::default(),
             output_preview: Vec::new(),
+            non_clickable: false,
+        }
+    }
+
+    fn new_non_clickable(name: &str) -> Self {
+        // special case for the finalize node
+        OutputField {
+            name: name.to_string(),
+            position: egui::Pos2::default(),
+            output_preview: Vec::new(),
+            non_clickable: true,
         }
     }
 
@@ -727,11 +750,11 @@ impl RulesApp {
             let mut all_input_values: Vec<Vec<String>> = Vec::new();
 
             for i in 0..5 {
-                let input_values: Vec<String> = node
+                let mut maybe_input_values: Vec<Option<String>> = node
                     .inputs
                     .iter()
                     .enumerate()
-                    .filter_map(|(field_idx, input_field)| match &input_field.kind {
+                    .map(|(field_idx, input_field)| match &input_field.kind {
                         InputKind::FieldOnly
                         | InputKind::FieldOrValue(FieldOrValue { toggle: false, .. }) => {
                             let input_ref = InputRef {
@@ -743,16 +766,28 @@ impl RulesApp {
                                     [output_ref.field_idx]
                                     .output_preview
                                     .get(i)
+                                    .cloned()
                             })
                         }
                         InputKind::ValueOnly { value }
                         | InputKind::FieldOrValue(FieldOrValue {
                             toggle: true,
                             value,
-                        }) => Some(value),
+                        }) => Some(value.clone()),
                     })
-                    .cloned()
                     .collect();
+
+                // output fields don't all have to be mapped
+                if node.kind == NodeKind::OutputFields {
+                    for maybe_val in maybe_input_values.iter_mut() {
+                        if maybe_val.is_none() {
+                            *maybe_val = Some("".to_string());
+                        }
+                    }
+                }
+
+                let input_values: Vec<String> =
+                    maybe_input_values.into_iter().filter_map(|x| x).collect();
 
                 // node is not ready to be previewed
                 if input_values.len() != node.inputs.len() {
@@ -809,7 +844,7 @@ impl eframe::App for RulesApp {
                         NodeRef::Input(input_ref) => {
                             self.edges.remove(&input_ref);
                         }
-                        NodeRef::Output(output_ref) => {}
+                        NodeRef::Output(_) => {}
                     },
                 }
             }
