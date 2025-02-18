@@ -1,8 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 use voca_rs::*;
 
-use eframe::egui::{self, Color32, Stroke};
-use egui::{ahash::HashSet, RichText};
+use eframe::egui::{self, Color32};
+use egui::{ahash::HashSet, Pos2, RichText};
 use egui_extras::{Column, TableBuilder};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -762,11 +762,12 @@ impl RulesApp {
                                 field_idx,
                             };
                             self.edges.get(&input_ref).and_then(|output_ref| {
-                                self.nodes.get(&output_ref.window_id).unwrap().outputs
-                                    [output_ref.field_idx]
-                                    .output_preview
-                                    .get(i)
-                                    .cloned()
+                                self.nodes.get(&output_ref.window_id).and_then(|node| {
+                                    node.outputs[output_ref.field_idx]
+                                        .output_preview
+                                        .get(i)
+                                        .cloned()
+                                })
                             })
                         }
                         InputKind::ValueOnly { value }
@@ -870,11 +871,7 @@ impl eframe::App for RulesApp {
                     };
 
                     if let Some(mouse_pos) = ctx.pointer_latest_pos() {
-                        let painter = ui.painter();
-                        painter.line_segment(
-                            [window_pos, mouse_pos],
-                            Stroke::new(2.0, Color32::WHITE),
-                        );
+                        draw_nice_line(ui, window_pos, mouse_pos);
                     }
                 });
         }
@@ -884,14 +881,13 @@ impl eframe::App for RulesApp {
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 for (lhs, rhs) in &self.edges {
-                    let lhs = self.resolve_input(lhs).unwrap();
-                    let rhs = self.resolve_output(rhs).unwrap();
-
-                    let painter = ui.painter();
-                    painter.line_segment(
-                        [lhs.position, rhs.position],
-                        Stroke::new(2.0, Color32::WHITE),
-                    );
+                    let Some(lhs) = self.resolve_input(lhs) else {
+                        continue;
+                    };
+                    let Some(rhs) = self.resolve_output(rhs) else {
+                        continue;
+                    };
+                    draw_nice_line(ui, lhs.position, rhs.position);
                 }
             });
 
@@ -945,4 +941,21 @@ impl eframe::App for RulesApp {
         self.update_edge_state();
         self.update_node_previews();
     }
+}
+
+fn draw_nice_line(ui: &egui::Ui, from: Pos2, to: Pos2) {
+    let painter = ui.painter();
+
+    let d = to - from;
+    let p1 = from + egui::Vec2::new(0.2 * d.x, 0.01 * d.y);
+    let p2 = to - egui::Vec2::new(0.2 * d.x, 0.01 * d.y);
+
+    let points = [from, p1, p2, to];
+
+    painter.add(egui::Shape::CubicBezier(egui::epaint::CubicBezierShape {
+        points,
+        closed: false,
+        fill: Color32::from_rgba_unmultiplied(0, 0, 0, 0),
+        stroke: egui::epaint::PathStroke::new(2.0, Color32::WHITE),
+    }));
 }
